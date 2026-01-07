@@ -15,7 +15,11 @@ import atexit
 import time
 import logging
 import numpy as np
+import re
 from concurrent.futures import ThreadPoolExecutor
+from enum import StrEnum
+
+from precilaser import Seed
 
 from sipyco import pyon
 from sipyco.pc_rpc import Server as RPCServer
@@ -69,6 +73,23 @@ def get_argparser():
                         help="directory containing backup copies of "
                              "configuration files")
     return parser
+
+
+class LaserType(StrEnum):
+    PRECILASER = "precilaser"
+    DLC_PRO = "dlcpro"
+
+
+class DLCProConnectionError(Exception):
+    pass
+
+
+class PrecilaserConnectionError(Exception):
+    pass
+
+
+class PrecilaserConfigError(Exception):
+    pass
 
 
 class WandServer:
@@ -150,6 +171,52 @@ class WandServer:
 
         self.running = False
 
+    async def _get_dlcpro_connection(self, conf, laser):
+        try:
+            dlcpro = DLCpro(NetworkConnection(conf["host"]))
+            await dlcpro.open()
+            return dlcpro
+        except (DecopError, OSError) as e:
+            logger.warning(
+                "could not connect to laser '{}', retrying in 60s (lock unavailable)"
+                .format(laser))
+            if conf["locked"]:
+                self.control_interface.unlock(laser, conf["lock_owner"])
+            try:
+                await dlcpro.close()
+            except:
+                logger.warning(f"failed to clean up connection to '{laser}'", exc_info=True)
+            raise DLCProConnectionError() from e
+
+    def _get_precilaser_connection(self, conf, laser):
+        com_port = conf.get("host")
+
+        pattern = re.compile(r'^COM[1-9]\d*$', re.IGNORECASE)
+        if com_port and not pattern.match(com_port):
+            message = f"Invalid COM port '{com_port}' specified for laser '{laser}'"
+            logger.warning(message)
+            raise PrecilaserConfigError(message)
+
+        address = conf.get("address")
+        if address is None:
+            logger.warning(f"No address specified for laser '{laser}', using default value (100)")
+            address = 100
+
+        try:
+            seed = Seed(com_port, address=address)
+            return seed
+        except ValueError as e:
+            logger.warning(
+                "could not connect to laser '{}', retrying in 60s (lock unavailable)"
+                .format(laser))
+            if conf["locked"]:
+                self.control_interface.unlock(laser, conf["lock_owner"])
+            try:
+                seed.rm.close()
+            except:
+                logger.warning(f"failed to clean up connection to '{laser}'", exc_info=True)
+            raise PrecilaserConnectionError() from e
+
     def start(self):
         """ Start the server """
 
@@ -188,27 +255,39 @@ class WandServer:
 
         # only try to lock lasers with a controller specified
         if not conf.get("host") or self.args.simulation:
+            logger.warning(f"No host specified for laser '{laser}', lock task not started")
             return
+
+        if not conf.get("laser_type"):
+            logger.warning(f"No laser type specified for laser '{laser}', lock task not started")
+            return
+
+        laser_type = conf.get("laser_type").lower()
+        if laser_type not in LaserType:
+            logger.warning(f"Unrecognised laser type '{laser_type}' for laser '{laser}', lock task not started")
+            return
+
+        dlcpro = None
+        precilaser = None
 
         while self.running:
             conf["lock_ready"] = False
 
-            try:
-                dlcpro = DLCpro(NetworkConnection(conf["host"]))
-                await dlcpro.open()
-            except (DecopError, OSError):
-                logger.warning(
-                    "could not connect to laser '{}', retrying in 60s (lock unavailable)"
-                    .format(laser))
-                if conf["locked"]:
-                    self.control_interface.unlock(laser, conf["lock_owner"])
+            if laser_type == LaserType.DLC_PRO:
                 try:
-                    await dlcpro.close()
-                except:
-                    logger.warning(f"failed to clean up connection to '{laser}'", exc_info=True)
-                    pass
-                await asyncio.sleep(60)
-                continue
+                    dlcpro = await self._get_dlcpro_connection(conf, laser)
+                except DLCProConnectionError:
+                    await asyncio.sleep(60)
+                    continue
+
+            elif laser_type == LaserType.PRECILASER:
+                try:
+                    precilaser = await asyncio.to_thread(
+                        self._get_precilaser_connection(conf, laser)
+                    )
+                except PrecilaserConnectionError:
+                    await asyncio.sleep(60)
+                    continue
 
             self.wake_locks[laser].set()
             conf["lock_ready"] = True
@@ -261,33 +340,56 @@ class WandServer:
                 V_error = min(V_error, 0.25)
                 V_error = max(V_error, -0.25)
 
-                try:
+                if laser_type == LaserType.DLC_PRO:
                     target = conf.get("target", "laser1")
                     actuator = conf.get("actuator", "dl:pc:voltage-set")
-                    v_pzt = await dlcpro.get(":".join([target, actuator]))
-                    v_pzt -= V_error
-
-                    if v_pzt > v_pzt_max or v_pzt < v_pzt_min:
-                        logger.warning(
-                            f"'{laser}' lock railed, piezo voltage: {v_pzt:.2f}V " +
-                            f"outside range {v_pzt_min} - {v_pzt_max}V"
-                        )
-                        self.control_interface.unlock(laser,
-                                                      conf["lock_owner"])
+                    try:
+                        v_pzt = await dlcpro.get(":".join([target, actuator]))
+                    except OSError:
+                        logger.warning("Connection to laser '{}' lost"
+                                       .format(laser))
+                        self.control_interface.unlock(laser, conf["lock_owner"])
                         await asyncio.sleep(0)
-                        continue
+                        break
 
-                    await dlcpro.set(":".join([target, actuator]), v_pzt)
+                elif laser_type == LaserType.PRECILASER:
+                    v_pzt = precilaser.piezo_voltage
 
-                except OSError:
-                    logger.warning("Connection to laser '{}' lost"
-                                   .format(laser))
+                v_pzt -= V_error
+
+                if v_pzt > v_pzt_max or v_pzt < v_pzt_min:
+                    logger.warning(
+                        f"'{laser}' lock railed, piezo voltage: {v_pzt:.2f}V " +
+                        f"outside range {v_pzt_min} - {v_pzt_max}V"
+                    )
                     self.control_interface.unlock(laser, conf["lock_owner"])
                     await asyncio.sleep(0)
-                    break
+                    continue
+
+                if laser_type == LaserType.DLC_PRO:
+                    try:
+                        await dlcpro.set(":".join([target, actuator]), v_pzt)
+                    except OSError:
+                        logger.warning("Connection to laser '{}' lost"
+                                       .format(laser))
+                        self.control_interface.unlock(laser, conf["lock_owner"])
+                        await asyncio.sleep(0)
+                        break
+
+                elif laser_type == LaserType.PRECILASER:
+                    try:
+                        precilaser.piezo_voltage = v_pzt
+                    except ValueError as e:
+                        logger.warning(f"Failed to set piezo voltage of laser '{laser}' to {v_pzt} V")
+                        self.control_interface.unlock(laser, conf["lock_owner"])
+                        await asyncio.sleep(0)
+                        break
 
         try:
-            await dlcpro.close()
+            if laser_type == LaserType.DLC_PRO:
+                await dlcpro.close()
+            elif laser_type == LaserType.PRECILASER:
+                precilaser.rm.close()
         except Exception:
             pass
         finally:
