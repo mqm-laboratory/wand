@@ -211,10 +211,6 @@ class WandServer:
                 .format(laser))
             if conf["locked"]:
                 self.control_interface.unlock(laser, conf["lock_owner"])
-            try:
-                seed.rm.close()
-            except:
-                logger.warning(f"failed to clean up connection to '{laser}'", exc_info=True)
             raise PrecilaserConnectionError() from e
 
     def start(self):
