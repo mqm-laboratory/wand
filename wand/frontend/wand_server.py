@@ -188,11 +188,11 @@ class WandServer:
                 logger.warning(f"failed to clean up connection to '{laser}'", exc_info=True)
             raise DLCProConnectionError() from e
 
-    def _get_precilaser_connection(self, conf, laser):
+    async def _get_precilaser_connection(self, conf, laser):
         com_port = conf.get("host")
 
         pattern = re.compile(r'^COM[1-9]\d*$', re.IGNORECASE)
-        if com_port and not pattern.match(com_port):
+        if not pattern.match(com_port):
             message = f"Invalid COM port '{com_port}' specified for laser '{laser}'"
             logger.warning(message)
             raise PrecilaserConfigError(message)
@@ -203,7 +203,9 @@ class WandServer:
             address = 100
 
         try:
+            logger.debug(f"Connecting to Precilaser '{laser}' on {com_port} (address: {address})")
             seed = Seed(com_port, address=address)
+            logger.debug(f"Connected to Precilaser '{laser}'")
             return seed
         except ValueError as e:
             logger.warning(
@@ -212,6 +214,11 @@ class WandServer:
             if conf["locked"]:
                 self.control_interface.unlock(laser, conf["lock_owner"])
             raise PrecilaserConnectionError() from e
+        except Exception as e:
+            logger.warning(f"Unexpected error when connecting to laser '{laser}'", exc_info=True)
+            if conf["locked"]:
+                self.control_interface.unlock(laser, conf["lock_owner"])
+            raise e
 
     def start(self):
         """ Start the server """
@@ -247,6 +254,7 @@ class WandServer:
         loop.run_forever()
 
     async def lock_task(self, laser):
+        logger.info(f"Starting lock task for laser '{laser}'")
         conf = self.laser_db.raw_view[laser]
 
         # only try to lock lasers with a controller specified
@@ -254,12 +262,13 @@ class WandServer:
             logger.warning(f"No host specified for laser '{laser}', lock task not started")
             return
 
+        laser_type = conf.get("laser_type")
+
         if not conf.get("laser_type"):
             logger.warning(f"No laser type specified for laser '{laser}', lock task not started")
             return
 
-        laser_type = conf.get("laser_type").lower()
-        if laser_type not in LaserType:
+        if laser_type.lower() not in LaserType:
             logger.warning(f"Unrecognised laser type '{laser_type}' for laser '{laser}', lock task not started")
             return
 
@@ -270,6 +279,7 @@ class WandServer:
             conf["lock_ready"] = False
 
             if laser_type == LaserType.DLC_PRO:
+                logger.debug(f"Attempting to connect to DLC Pro '{laser}' for locking")
                 try:
                     dlcpro = await self._get_dlcpro_connection(conf, laser)
                 except DLCProConnectionError:
@@ -277,16 +287,17 @@ class WandServer:
                     continue
 
             elif laser_type == LaserType.PRECILASER:
+                logger.debug(f"Attempting to connect to Precilaser '{laser}' for locking")
                 try:
-                    precilaser = await asyncio.to_thread(
-                        self._get_precilaser_connection(conf, laser)
-                    )
-                except PrecilaserConnectionError:
+                    precilaser = await self._get_precilaser_connection(conf, laser)
+                except PrecilaserConnectionError as e:
+                    logger.debug(f"Could not connect to laser '{laser}': {e}")
                     await asyncio.sleep(60)
                     continue
 
             self.wake_locks[laser].set()
             conf["lock_ready"] = True
+            logger.debug(f"Lock task for laser '{laser}' ready")
 
             while self.running:
 
@@ -316,9 +327,14 @@ class WandServer:
                     await asyncio.sleep(0)
                     continue
 
+                logger.debug("Measuring frequency for lock of '{}'".format(laser))
+
                 status, delta, _ = await self.control_interface.get_freq(
                     laser, age=0, priority=5, get_osa_trace=False,
                     blocking=True, mute=False, offset_mode=True)
+
+                logger.debug("'{}' lock measurement: status={}, delta={}"
+                             .format(laser, status, delta))
 
                 if status != WLMMeasurementStatus.OKAY:
                     continue
