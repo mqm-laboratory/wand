@@ -424,7 +424,7 @@ class WandServer:
                         continue
                     except Exception as e:
                         logger.exception(
-                            f"Error getting frequency for laser '{laser}': {e}"
+                            f"Error getting frequency for laser {laser} : {e}"
                         )
                         self.control_interface.unlock(laser, conf["lock_owner"])
                         await asyncio.sleep(0)
