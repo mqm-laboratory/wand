@@ -314,17 +314,18 @@ class WandServer:
             )
             return
 
-        laser_type = conf.get("laser_type")
-
-        if not conf.get("laser_type"):
+        laser_type_raw = conf.get("laser_type")
+        if not laser_type_raw:
             logger.warning(
                 f"No laser type specified for laser '{laser}', lock task not started"
             )
             return
 
-        if laser_type.lower() not in LaserType:
+        try:
+            laser_type = LaserType(str(laser_type_raw).lower())
+        except ValueError:
             logger.warning(
-                f"Unrecognised laser type '{laser_type}' for laser '{laser}', lock task not started"
+                f"Unrecognised laser type '{laser_type_raw}' for laser '{laser}', lock task not started"
             )
             return
 
