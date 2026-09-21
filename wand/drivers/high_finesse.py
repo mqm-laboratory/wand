@@ -323,7 +323,10 @@ class WLM:
         t0 = time.time()
         while True:
             ret = self.lib.WaitForWLMEvent(byref(event), byref(p_int), byref(p_double))
-            if ret == -1:
+            if ret == -2:
+                logger.warning("WLM WaitForWLMEvent returned ErrBadSignal")
+                ret_str = "Bad signal"
+            elif ret == -1:
                 logger.warning("WLM WaitForWLMEvent timed out")
                 ret_str = "Timeout"
             elif ret == 1:
