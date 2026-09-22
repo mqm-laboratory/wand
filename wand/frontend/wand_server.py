@@ -55,7 +55,13 @@ logger = logging.getLogger(__name__)
 
 
 def handle_exception(loop, context):
-    logger.error(f"Caught global exception: {context}")
+    exc = context.get("exception")
+    if exc is not None:
+        logger.error(
+            "Caught global exception: %s", context, exc_info=(type(exc), exc, exc.__traceback__)
+        )
+    else:
+        logger.error("Caught global exception: %s", context)
 
 
 def task_id_generator():
