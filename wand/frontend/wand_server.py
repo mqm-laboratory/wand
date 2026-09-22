@@ -601,6 +601,13 @@ class WandServer:
                         logger.error(
                             f"Frequency & OSA measurement timed out for laser: '{laser}'"
                         )
+                        self.freq_db[laser] = {
+                            "freq": None,
+                            "status": int(WLMMeasurementStatus.ERROR),
+                            "timestamp": time.time(),
+                        }
+                        meas["done"].set()
+                        self.queue.remove(meas)
                         continue
                     wlm_data, osa = freq_osa_measurement
 
