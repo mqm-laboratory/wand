@@ -282,7 +282,7 @@ class WandServer:
         self.loop = loop
         atexit.register(loop.close)
 
-        asyncio.get_event_loop().set_debug(True)
+        loop.set_debug(logger.isEnabledFor(logging.DEBUG))
         loop.set_exception_handler(handle_exception)
 
         # start control server
