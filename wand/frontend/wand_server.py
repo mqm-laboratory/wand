@@ -398,10 +398,10 @@ class WandServer:
                     v_pzt_max = conf.get("v_pzt_max", 100)
                     v_pzt_min = conf.get("v_pzt_min", 25)
 
-                    await asyncio.wait(
-                        {asyncio.create_task(self.wake_locks[laser].wait())},
-                        timeout=poll_time,
-                    )
+                    try:
+                        await asyncio.wait_for(self.wake_locks[laser].wait(), timeout=poll_time)
+                    except asyncio.TimeoutError:
+                        pass
                     self.wake_locks[laser].clear()
 
                     if timeout is not None and time.time() > (locked_at + timeout):
