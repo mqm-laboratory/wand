@@ -58,7 +58,9 @@ def handle_exception(loop, context):
     exc = context.get("exception")
     if exc is not None:
         logger.error(
-            "Caught global exception: %s", context, exc_info=(type(exc), exc, exc.__traceback__)
+            "Caught global exception: %s",
+            context,
+            exc_info=(type(exc), exc, exc.__traceback__),
         )
     else:
         logger.error("Caught global exception: %s", context)
@@ -399,7 +401,9 @@ class WandServer:
                     v_pzt_min = conf.get("v_pzt_min", 25)
 
                     try:
-                        await asyncio.wait_for(self.wake_locks[laser].wait(), timeout=poll_time)
+                        await asyncio.wait_for(
+                            self.wake_locks[laser].wait(), timeout=poll_time
+                        )
                     except asyncio.TimeoutError:
                         pass
                     self.wake_locks[laser].clear()
@@ -606,6 +610,7 @@ class WandServer:
                             "status": int(WLMMeasurementStatus.ERROR),
                             "timestamp": time.time(),
                         }
+                        self.osa_db[laser] = {"trace": None, "timestamp": 0}
                         meas["done"].set()
                         self.queue.remove(meas)
                         continue
@@ -626,6 +631,13 @@ class WandServer:
                         logger.error(
                             f"Frequency measurement timed out for laser: '{laser}'"
                         )
+                        self.freq_db[laser] = {
+                            "freq": None,
+                            "status": int(WLMMeasurementStatus.ERROR),
+                            "timestamp": time.time(),
+                        }
+                        meas["done"].set()
+                        self.queue.remove(meas)
                         continue
 
                     try:
@@ -641,6 +653,9 @@ class WandServer:
                         )
                     except asyncio.TimeoutError:
                         logger.error(f"OSA measurement timed out for laser: '{laser}'")
+                        self.osa_db[laser] = {"trace": None, "timestamp": 0}
+                        meas["done"].set()
+                        self.queue.remove(meas)
                         continue
 
                     wlm_data, osa = freq_measurement, osa_measurement
