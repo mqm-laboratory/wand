@@ -324,9 +324,12 @@ class WLM:
         while True:
             ret = self.lib.WaitForWLMEvent(byref(event), byref(p_int), byref(p_double))
             if ret == -2:
-                logger.warning("WLM WaitForWLMEvent returned ErrBadSignal")
-                ret_str = "Bad signal"
+                logger.warning(
+                    "WLM WaitForWLMEvent returned ErrBadSignal: The wavemeter has not detected a calculable signal"
+                )
+                continue
             elif ret == -1:
+                # ErrNoSignal: The wavemeter has not detected any signal
                 logger.warning("WLM WaitForWLMEvent timed out")
                 ret_str = "Timeout"
             elif ret == 1:
