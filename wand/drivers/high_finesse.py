@@ -33,7 +33,7 @@ class WLMException(Exception):
 
 
 class WLM:
-    """ " Driver for HighFinesse WaveLength Meters (WLM)"""
+    """Driver for HighFinesse WaveLength Meters (WLM)"""
 
     def __init__(self, simulation):
         self.active_switch_ch = 1

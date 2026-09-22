@@ -214,9 +214,7 @@ class WandServer:
             return dlcpro
         except (DecopError, OSError) as e:
             logger.warning(
-                "could not connect to laser '{}', retrying in 60s (lock unavailable)".format(
-                    laser
-                )
+                f"could not connect to laser '{laser}', retrying in 60s (lock unavailable)"
             )
             if conf["locked"]:
                 self.control_interface.unlock(laser, conf["lock_owner"])
@@ -253,20 +251,18 @@ class WandServer:
             return seed
         except ValueError as e:
             logger.warning(
-                "could not connect to laser '{}', retrying in 60s (lock unavailable)".format(
-                    laser
-                )
+                f"could not connect to laser '{laser}', retrying in 60s (lock unavailable)"
             )
             if conf["locked"]:
                 self.control_interface.unlock(laser, conf["lock_owner"])
             raise PrecilaserConnectionError() from e
-        except Exception as e:
+        except Exception:
             logger.warning(
                 f"Unexpected error when connecting to laser '{laser}'", exc_info=True
             )
             if conf["locked"]:
                 self.control_interface.unlock(laser, conf["lock_owner"])
-            raise e
+            raise
 
     def start(self):
         """Start the server"""
@@ -403,12 +399,12 @@ class WandServer:
                     self.wake_locks[laser].clear()
 
                     if timeout is not None and time.time() > (locked_at + timeout):
-                        logger.info("'{}' lock timed out".format(laser))
+                        logger.info(f"'{laser}' lock timed out")
                         self.control_interface.unlock(laser, conf["lock_owner"])
                         await asyncio.sleep(0)
                         continue
 
-                    logger.debug("Measuring frequency for lock of '{}'".format(laser))
+                    logger.debug(f"Measuring frequency for lock of '{laser}'")
 
                     try:
                         status, delta, _ = await asyncio.wait_for(
@@ -437,9 +433,7 @@ class WandServer:
                         continue
 
                     logger.debug(
-                        "'{}' lock measurement: status={}, delta={}".format(
-                            laser, status, delta
-                        )
+                        f"'{laser}' lock measurement: status={status}, delta={delta}"
                     )
 
                     if status != WLMMeasurementStatus.OKAY:
@@ -449,7 +443,7 @@ class WandServer:
                     V_error = f_error * gain
 
                     if abs(f_error) > capture_range:
-                        logger.warning("'{}' outside capture range".format(laser))
+                        logger.warning(f"'{laser}' outside capture range")
                         self.control_interface.unlock(laser, conf["lock_owner"])
                         await asyncio.sleep(0)
                         continue
@@ -479,11 +473,9 @@ class WandServer:
 
                     v_pzt -= V_error
 
-                    logger.warning(
-                        "'{}' lock update: f_error={:.2f} MHz, "
-                        "V_error={:.3f} V, new piezo voltage={:.2f} V".format(
-                            laser, f_error * 1e-6, V_error, v_pzt
-                        )
+                    logger.debug(
+                        f"'{laser}' lock update: f_error={f_error * 1e-6:.2f} MHz, "
+                        f"V_error={V_error:.3f} V, new piezo voltage={v_pzt:.2f} V"
                     )
 
                     if v_pzt > v_pzt_max or v_pzt < v_pzt_min:
@@ -678,7 +670,7 @@ class WandServer:
                     if time.time() > (t_en + self.args.fast_mode_timeout):
                         self.laser_db[laser]["fast_mode"] = False
                         self.save_config_file()
-                        logger.info("{} fast mode timeout".format(laser))
+                        logger.info(f"{laser} fast mode timeout")
 
                 # auto-exposure
                 if laser_conf["auto_exposure"]:
@@ -714,8 +706,8 @@ class WandServer:
                 await asyncio.sleep(1)
 
     def take_freq_measurement(self, laser, f0):
-        """Preform a single frequency measurement"""
-        logger.info("Taking new frequency measurement for {}".format(laser))
+        """Perform a single frequency measurement"""
+        logger.info(f"Taking new frequency measurement for {laser}")
 
         status, freq = self.wlm.get_frequency()
         freq = {"freq": freq, "status": int(status), "timestamp": time.time()}
@@ -738,7 +730,7 @@ class WandServer:
 
     def take_freq_osa_measurement(self, laser, f0, get_osa_trace):
         """Get frequency and spectral data from the wlm"""
-        logger.info("Taking new frequency + spectral measurement for {}".format(laser))
+        logger.info(f"Taking new frequency + spectral measurement for {laser}")
 
         status, freq = self.wlm.get_frequency()
         freq = {"freq": freq, "status": int(status), "timestamp": time.time()}
